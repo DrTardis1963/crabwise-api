@@ -18,6 +18,7 @@ import {
   deleteObject,
   objectExists,
 } from './s3.service';
+import { MAX_DIGITAL_FILE_SIZE_BYTES, MAX_IMAGE_SIZE_BYTES } from '../validators/media.schemas';
 
 export interface PresignUploadInput {
   readonly type: 'IMAGE' | 'DIGITAL_FILE';
@@ -76,6 +77,14 @@ export async function presignMediaUpload(
   userId: string,
   input: PresignUploadInput,
 ): Promise<PresignUploadResult> {
+  const maxSizeBytes = input.type === 'IMAGE' ? MAX_IMAGE_SIZE_BYTES : MAX_DIGITAL_FILE_SIZE_BYTES;
+  if (!Number.isInteger(input.size) || input.size <= 0 || input.size > maxSizeBytes) {
+    throw new AppError(
+      'BAD_REQUEST',
+      `Upload size must be an integer between 1 and ${maxSizeBytes} bytes for ${input.type}`,
+    );
+  }
+
   if (input.parentType !== undefined && input.parentId !== undefined) {
     await assertParentOwnership(userId, input.parentType, input.parentId);
   }
@@ -147,9 +156,7 @@ async function toMediaRecord(media: {
 }): Promise<MediaRecord> {
   const variants = await prisma.media.findMany({ where: { variantOfId: media.id } });
   const variantsByLabel = new Map(
-    variants
-      .filter((v) => v.variantLabel !== null)
-      .map((v) => [v.variantLabel as string, v]),
+    variants.filter((v) => v.variantLabel !== null).map((v) => [v.variantLabel as string, v]),
   );
   const completeVariants = GENERATED_IMAGE_VARIANT_LABELS.every((label) =>
     variantsByLabel.has(label),
