@@ -18,6 +18,10 @@ import {
   deleteObject,
   objectExists,
 } from './s3.service';
+import {
+  ALLOWED_DIGITAL_FILE_MIME_TYPES,
+  ALLOWED_IMAGE_MIME_TYPES,
+} from '../validators/media.schemas';
 
 export interface PresignUploadInput {
   readonly type: 'IMAGE' | 'DIGITAL_FILE';
@@ -76,6 +80,19 @@ export async function presignMediaUpload(
   userId: string,
   input: PresignUploadInput,
 ): Promise<PresignUploadResult> {
+  const allowedMimeTypes: readonly string[] =
+    input.type === 'IMAGE' ? ALLOWED_IMAGE_MIME_TYPES : ALLOWED_DIGITAL_FILE_MIME_TYPES;
+  if (
+    typeof input.mimeType !== 'string' ||
+    input.mimeType !== input.mimeType.trim() ||
+    !allowedMimeTypes.includes(input.mimeType)
+  ) {
+    throw new AppError(
+      'BAD_REQUEST',
+      `Unsupported MIME type "${input.mimeType}" for ${input.type}`,
+    );
+  }
+
   if (input.parentType !== undefined && input.parentId !== undefined) {
     await assertParentOwnership(userId, input.parentType, input.parentId);
   }
@@ -147,9 +164,7 @@ async function toMediaRecord(media: {
 }): Promise<MediaRecord> {
   const variants = await prisma.media.findMany({ where: { variantOfId: media.id } });
   const variantsByLabel = new Map(
-    variants
-      .filter((v) => v.variantLabel !== null)
-      .map((v) => [v.variantLabel as string, v]),
+    variants.filter((v) => v.variantLabel !== null).map((v) => [v.variantLabel as string, v]),
   );
   const completeVariants = GENERATED_IMAGE_VARIANT_LABELS.every((label) =>
     variantsByLabel.has(label),
