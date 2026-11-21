@@ -94,24 +94,29 @@ export async function presignMediaUpload(
     },
   });
 
-  if (input.parentType === 'ARTWORK' && input.parentId !== undefined) {
-    await prisma.artworkMedia.create({
-      data: { artworkId: input.parentId, mediaId: media.id },
-    });
-  } else if (input.parentType === 'PORTFOLIO' && input.parentId !== undefined) {
-    await prisma.portfolioMedia.create({
-      data: { portfolioItemId: input.parentId, mediaId: media.id },
-    });
+  try {
+    if (input.parentType === 'ARTWORK' && input.parentId !== undefined) {
+      await prisma.artworkMedia.create({
+        data: { artworkId: input.parentId, mediaId: media.id },
+      });
+    } else if (input.parentType === 'PORTFOLIO' && input.parentId !== undefined) {
+      await prisma.portfolioMedia.create({
+        data: { portfolioItemId: input.parentId, mediaId: media.id },
+      });
+    }
+
+    const uploadUrl = await createPresignedUploadUrl(key, input.mimeType);
+
+    return {
+      mediaId: media.id,
+      uploadUrl,
+      key,
+      expiresInSeconds: PRESIGNED_UPLOAD_TTL_SECONDS,
+    };
+  } catch (err) {
+    await prisma.media.deleteMany({ where: { id: media.id } });
+    throw err;
   }
-
-  const uploadUrl = await createPresignedUploadUrl(key, input.mimeType);
-
-  return {
-    mediaId: media.id,
-    uploadUrl,
-    key,
-    expiresInSeconds: PRESIGNED_UPLOAD_TTL_SECONDS,
-  };
 }
 
 export interface MediaVariant {
@@ -147,9 +152,7 @@ async function toMediaRecord(media: {
 }): Promise<MediaRecord> {
   const variants = await prisma.media.findMany({ where: { variantOfId: media.id } });
   const variantsByLabel = new Map(
-    variants
-      .filter((v) => v.variantLabel !== null)
-      .map((v) => [v.variantLabel as string, v]),
+    variants.filter((v) => v.variantLabel !== null).map((v) => [v.variantLabel as string, v]),
   );
   const completeVariants = GENERATED_IMAGE_VARIANT_LABELS.every((label) =>
     variantsByLabel.has(label),
@@ -214,6 +217,7 @@ export async function confirmMediaUpload(userId: string, mediaId: string): Promi
         exists = true;
       }
       if (!exists) {
+        await prisma.media.deleteMany({ where: { id: media.id } });
         throw new AppError(
           'UNPROCESSABLE_ENTITY',
           'The upload did not complete — upload the file again before confirming',
